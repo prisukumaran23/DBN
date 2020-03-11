@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Nov 11 14:15:18 2019
+Training RBM on MNIST data
+@author: priyankasukumaran
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+train_data = np.loadtxt("train_binary.csv", delimiter=",")
+test_data = np.loadtxt("test_binary.csv", delimiter=",")
+
+    
+class RBM:
+    
+    
+    def __init__(self, n_vis, n_hid, n_train, n_test, train_visible, test_visible, epsilon = 0.01):
+        self.n_vis = n_vis
+        self.n_hid = n_hid
+        self.n_train = n_train
+        self.n_test = n_test
+        self.train_visible = train_visible
+        self.test_visible = test_visible
+        self.epsilon = epsilon
+        self.visible_prime = np.zeros((n_vis,1))
+        self.hidden = np.zeros((n_hid,1))
+        self.hidden_prime = np.zeros((n_hid,1))
+        self.weights = np.random.normal(loc=0, scale=0.01, size=(n_vis,n_hid))
+        self.a_bias = np.zeros((n_vis,1))
+        self.b_bias =  np.zeros((n_hid,1))
+        self.error_print = False
+        self.error_train = []
+        self.error_test = []
+        
+    
+    def sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
+    
+    
+    def v_to_h(self, x):
+        '''
+        Propagates the data in the visible layer to hidden layer
+        Then performs random sampling of hidden layer nodes
+        Input x = visible layer probabilities 
+        Returns hidden layer activations after random sampling
+        '''
+        x_prob = self.sigmoid(x.T.dot(self.weights) + self.b_bias.T).T # Calc probabilities
+        x_activations = np.zeros((self.n_hid,1))
+        
+        # Sampling of new hidden layer probabilities
+        # Hidden unit turns on if  probability is greater than a random number 
+        #   uniformly distributed between 0 and 1
+        for i in range(self.n_hid):
+            s = np.random.uniform(0, 1, (self.n_hid,1))
+            if s[i] <= x_prob[i]:
+                x_activations[i] = 1
+            else: 
+                x_activations[i] = 0
+        return x_activations
+    
+    
+    def h_to_v(self, x):
+        '''
+        Propagates the data in the hidden layer to visible layer
+        Then performs random sampling of visible layer nodes
+        Input x = hidden layer activations 
+        Returns visble layer activations after random sampling
+        '''
+        x_prob = self.sigmoid(x.T.dot(self.weights.T) + self.a_bias.T).T  # Calc probabilities
+        x_activations = np.zeros((self.n_vis,1))
+        
+        # Sampling of new visible layer probabilities
+        # Visible unit turns on if  probability is greater than a random number 
+        #   uniformly distributed between 0 and 1
+        for i in range(self.n_vis):
+            s = np.random.uniform(0, 1, (self.n_vis,1))
+            if s[i] <= x_prob[i]:
+                x_activations[i] = 1
+            else: 
+                x_activations[i] = 0
+        return x_activations
+
+   
+    def train(self, n_epoch_length, n_error_every):
+        '''
+        Trains RBM by performing reconstruction, 
+        and updating weights and biases using contrastive divergence 
+        Prints error at each training epoch
+        n_epoch_length = Number of training sets used for calculating average 
+            update for weights and biases 
+        '''        
+        n_epoch = int(self.n_train/n_epoch_length)
+        plt_err_every = n_epoch_length*n_error_every
+        count = 1
+        self.error_train = np.zeros((n_epoch,1))
+        self.error_test = np.zeros((n_epoch,1))
+
+        for epoch in range(n_epoch):
+            weights = np.random.normal(loc=0, scale=0.01, size=(self.n_vis,self.n_hid))
+            a_bias = np.zeros((self.n_vis,1))
+            b_bias =  np.zeros((self.n_hid,1))
+            error = np.zeros((n_epoch_length,1))
+            
+            for i in range(n_epoch_length):
+                # Forward propagation 
+                visible = self.train_visible[count-1].reshape(self.n_vis,1)
+                self.hidden = self.v_to_h(visible)
+                # Reconstruction 
+                self.visible_prime = self.h_to_v(self.hidden)
+                self.hidden_prime = self.v_to_h(self.visible_prime)
+                # Calculate weights and biases using learning rules
+                weights += self.epsilon * ((visible * self.hidden.T) - (self.visible_prime * self.hidden_prime.T))
+                a_bias += self.epsilon * (visible - self.visible_prime)
+                b_bias += self.epsilon * (self.hidden - self.hidden_prime) 
+                # Calculate error
+                error[i] = (np.sum((visible - self.visible_prime) ** 2)*100)/784.0
+                # Update counter 
+                count += 1
+                # Update weights and biases after every averaging step 
+            self.weights += weights/n_epoch_length
+            self.a_bias += a_bias/n_epoch_length
+            self.b_bias += b_bias/n_epoch_length
+        
+            # Calculate training error
+            self.error_train[epoch] = np.sum(error)/n_epoch_length
+            if self.error_print:
+                print("Epoch %s: Error is %s" % (epoch, self.error_train[epoch]))
+            # Calculate test error
+            self.error_test[epoch] =  self.calc_test_error(test_data, epoch)
+            if self.error_print:
+                print("Epoch %s: Test Error is %s" % (epoch, self.error_test[epoch]))
+        
+        ax = plt.axes()
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Error %')
+        y_train = self.error_train[::plt_err_every]
+        y_test = self.error_test[::plt_err_every]
+        x = np.linspace(0, n_epoch, int(n_epoch/plt_err_every)).reshape(int(n_epoch/plt_err_every),1)
+        ax.plot(x, y_train, '-b')
+        ax.plot(x, y_test, '-r')
+        plt.show()  
+        
+    
+    def calc_test_error(self, test_data, n):
+        '''
+        '''
+        # Forward propagation 
+        visible = self.test_visible[n].reshape(self.n_vis,1)
+        self.hidden = self.v_to_h(visible)
+        
+        # Reconstruction 
+        self.visible_prime = self.h_to_v(self.hidden)
+        
+        # Calculate error
+        err = (np.sum((visible - self.visible_prime) ** 2)*100)/784.0
+
+        return err 
+
+
+    def visualise_hidden_acts(self, n_hidden_act):
+        hidden = np.zeros((self.n_hid,1))
+        hidden[n_hidden_act] = 1
+        visible_recon = self.h_to_v(hidden)
+        # Visualise the visible reconstruction 
+        image = visible_recon.reshape(28,28)
+        plt.imshow(image, cmap="Greys")
+        
+    
+    def visualise_weights(self, col=10, row=10):
+        fig=plt.figure(figsize=(8, 8))
+        for i in range(1,101):
+            weights = self.weights[:,i-1].reshape(28,28)
+            fig.add_subplot(row, col, i)
+            plt.imshow(weights, cmap="Greys")
+        plt.show()
+    
+    
+trial = RBM(n_vis = 784, n_hid = 100 , n_train = 6000, n_test = 1000, 
+            train_visible = train_data, test_visible = test_data)
+trial.train(n_epoch_length = 10, n_error_every = 10)
+trial.visualise_weights()
